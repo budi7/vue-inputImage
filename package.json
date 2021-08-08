@@ -1,0 +1,14 @@
+{
+  "name": "inputfile",
+  "version": "1.0.0",
+  "description": "vue compnent for select and upload file",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "budi7",
+  "license": "ISC",
+  "dependencies": {
+    "resize-img": "^2.0.0"
+  }
+}
