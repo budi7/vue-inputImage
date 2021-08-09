@@ -1,47 +1,70 @@
 <template>
   <div
     v-cloak
-    class="box-input"
+    :class="'input-image ' + (is_full ? 'input-full' : '')"
     @drop.prevent="handleDroppedFile"
-    @dragover.prevent
+    @dragover.prevent="handleOnEnter"
+    @dragleave.prevent="handleOnLeave"
   >
-    <div v-show="!is_full" class="input-placeholder">
-      <input
-        id="inputFile"
-        type="file"
-        class="box-file"
-        :accept="allowedFileType"
-        multiple
-        hidden
-        @input="handleInput"
-      >
-      <label :class="`placeholder ${contentClass}`" for="inputFile">
-        <div class="group">
-          <img class="placeholder-logo" :src="placeholderLogo">
+    <div class="box-input">
+      <div v-show="!is_full" class="input-placeholder">
+        <input
+          id="inputFile"
+          type="file"
+          class="box-file"
+          :accept="allowedFileType"
+          multiple
+          hidden
+          @input="handleInput"
+        >
+        <label :class="`placeholder ${contentClass}`" for="inputFile">
+          <div class="group">
+            <img class="placeholder-logo" :src="placeholderLogo">
+          </div>
+        </label>
+      </div>
+      <div v-for="(dt,i ) in input" :key="`uploaded-${i}`" :class="`preview-wrapper uploaded ${contentClass}`" @click="$emit('click', dt)">
+        <img :src="dt" class="img">
+        <div class="top-info" @click="removeFromInput(i)">
+          <img class="close-logo" :src="closeLogo">
         </div>
-      </label>
-    </div>
-    <div v-for="(dt,i ) in input" :key="`uploaded-${i}`" :class="`preview-wrapper ${contentClass}`">
-      <img :src="dt" class="img uploaded">
-      <div @click="processRemove(dt)">
-        Hapus
+      </div>
+      <div v-for="(dt,i ) in queuedFiles" :key="`queued-${i}`" :class="`preview-wrapper ${contentClass} ` + (!dt.is_uploading && !dt.is_error ? 'queueing' : 'uploading' )">
+        <img :src="dt.preview" class="img">
+        <div v-if="dt.is_uploading" class="bottom-info">
+          <!-- loading  -->
+          <div class="content loading">
+            <div class="progress" :style="`width: ${dt.progress}%;`" />
+          </div>
+        </div>
+
+        <!-- error -->
+        <div v-if="dt.is_error" class="top-info" @click="removeFromQueue(i)">
+          <img class="close-logo" :src="closeLogo">
+        </div>
+        <div v-if="dt.is_error" class="center-info">
+          <img class="retry-logo" :src="retryLogo">
+        </div>
+        <div v-if="dt.is_error" class="bottom-info">
+          <div class="content error">
+            <p>{{ label.errors.general[lang] }}</p>
+          </div>
+        </div>
       </div>
     </div>
-    <div v-for="(dt,i ) in queuedFiles" :key="`queued-${i}`" :class="`preview-wrapper ${contentClass}`">
-      <img :src="dt.preview" class="img uploading">
-      <div v-if="dt.is_uploading">
-        Loading {{ dt.progress }}
-      </div>
-      <div v-if="dt.is_error">
-        {{ dt.error }}
-        retry
-      </div>
+    <div
+      v-if="withPlaceholder && !is_full"
+      class="dropper"
+    >
+      <p class="droper-label">
+        {{ label.placeholder[lang] }}
+      </p>
     </div>
   </div>
 </template>
 
 <script>
-import s3Mixin from './mixin.js'
+import s3Mixin from './mixin/s3.js'
 // import smartReize from './modules/smartResize.js'
 
 export default {
@@ -53,10 +76,10 @@ export default {
       default: () => { return [] },
       type: Array
     },
-    multiUploadProcessor: {
-      default: 1,
-      type: Number
-    },
+    // multiUploadProcessor: {
+    //   default: 2,
+    //   type: Number
+    // },
     maxFile: {
       default: null,
       type: Number
@@ -81,6 +104,10 @@ export default {
     contentClass: {
       default: '',
       type: String
+    },
+    withPlaceholder: {
+      default: true,
+      type: Boolean
     }
   },
   data () {
@@ -92,18 +119,22 @@ export default {
       trash: [],
       is_full: false,
       is_processing: false,
+      multiUploadProcessor: 1,
 
       label: require('./assets/label.json'),
-      placeholderLogo: require('./assets/placeholder.svg')
+      placeholderLogo: require('./assets/placeholder.svg'),
+      retryLogo: require('./assets/retry.svg'),
+      closeLogo: require('./assets/close.svg')
     }
   },
   watch: {
     value (val) {
       this.input = val
+      this.checkIsFull()
     }
   },
   created () {
-    this.$on('s3Uploaded', (res) => {
+    this.$on('uploaderUploaded', (res) => {
       // move uploaded file to model
       const finishedProcessIdx = this.queuedFiles.findIndex(function (_p) {
         return (_p.id === res.id)
@@ -113,42 +144,61 @@ export default {
       this.$emit('input', this.input)
 
       // on s3 upload done, run next queue
-      this.processQueue()
+      setTimeout(() => {
+        this.processQueue()
+      }, 1100) // get auto name per seconnd (consider autonaming use milisecond to remove this temiout block)
     })
-    this.$on('s3Error', (error) => {
+    this.$on('uploaderError', (error) => {
       // on s3 upload error, run next queue
       console.log('error', error)
-      this.processQueue()
     })
   },
   mounted () {
-
+    this.input = this.value
+    this.checkIsFull()
   },
   destroyed () {
-    this.$off('s3Uploaded')
-    this.$off('s3Error')
+    this.$off('uploaderUploaded')
+    this.$off('uploaderError')
   },
   methods: {
     handleDroppedFile (evt) {
-      if (this.is_full === true) { return }
+      evt.currentTarget.classList.remove('hovered')
+
+      if (evt.dataTransfer.files.length > this.maxFile) {
+        this.$emit('error', this.label.errors.max_file[this.lang])
+        return
+      }
+
+      if (this.is_full === true) {
+        this.$emit('error', this.label.errors.max_file[this.lang])
+        return
+      }
+
       evt.dataTransfer.files.forEach((dt) => {
         const extension = dt.type.replace(/(.*)\//g, '')
-        this.queuedFiles.push(this.s3MakeFileObject(dt, extension))
+        if (this.allowedFileType && (this.allowedFileType.includes(extension))) {
+          this.queuedFiles.push(this.uploaderMakeFileObject(dt, extension))
+        } else {
+          this.$emit('error', this.label.errors.invalid_file[this.lang])
+        }
       })
 
       this.checkIsFull()
       this.processQueue()
     },
     handleInput (evt) {
-      if (this.is_full === true) { return }
+      if (this.is_full === true) {
+        this.$emit('error', this.label.errors.max_file[this.lang])
+        return
+      }
 
-      console.log('tes')
-      console.log(this.maxFile, this.input.length, this.queuedFiles.length)
-
-      console.log(evt.target.files)
+      // console.log('tes')
+      // console.log(this.maxFile, this.input.length, this.queuedFiles.length)
+      // console.log(evt.target.files)
       evt.target.files.forEach((dt) => {
         const extension = dt.type.replace(/(.*)\//g, '')
-        this.queuedFiles.push(this.s3MakeFileObject(dt, extension))
+        this.queuedFiles.push(this.uploaderMakeFileObject(dt, extension))
       })
 
       this.checkIsFull()
@@ -166,9 +216,11 @@ export default {
       this.is_processing = true
 
       for (let idx = 0; idx < this.multiUploadProcessor; idx++) {
-        console.log(process)
         // upload to s3
-        this.s3Upload(this.queuedFiles[idx])
+        console.log('processing', idx, this.queuedFiles[idx])
+        if (this.queuedFiles[idx]) {
+          this.uploaderUpload(this.queuedFiles[idx])
+        }
       }
     },
     processRemove (dt) {
@@ -179,12 +231,23 @@ export default {
     },
     commitImageRemoval () {
       if (this.trash.length === 0) { return }
-      this.s3Delete(this.trash)
+      this.uploaderDelete(this.trash)
     },
     checkIsFull () {
-      if (this.maxFile && (this.input.length + this.queuedFiles.length >= this.maxFile)) {
-        this.is_full = true
-      }
+      this.is_full = (this.maxFile && (this.input.length + this.queuedFiles.length >= this.maxFile))
+    },
+
+    handleOnEnter (evt) {
+      evt.currentTarget.classList.add('hovered')
+    },
+    handleOnLeave (evt) {
+      evt.currentTarget.classList.remove('hovered')
+    },
+    removeFromInput (i) {
+      this.input.splice(i, 1)
+    },
+    removeFromQueue (i) {
+      this.queuedFiles.splice(i, 1)
     }
   }
 }
@@ -193,13 +256,62 @@ export default {
 <style lang="scss">
 @import "~/assets/scss/var.scss";
 
+.input-image {
+  -webkit-touch-callout: none; /* iOS Safari */
+    -webkit-user-select: none; /* Safari */
+     -khtml-user-select: none; /* Konqueror HTML */
+       -moz-user-select: none; /* Old versions of Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Non-prefixed version, currently
+                                  supported by Chrome, Edge, Opera and Firefox */
+  border: 2px dashed $color-white;
+}
+
+.hovered {
+  &:not(.input-full) {
+    border: 2px dashed $color-secondary;
+    border-radius: $borderRadiusMedium;
+
+    .box-input {
+      -webkit-filter: blur(5px);
+      -moz-filter: blur(5px);
+      -o-filter: blur(5px);
+      -ms-filter: blur(5px);
+      filter: blur(5px);
+      cursor: copy;
+    }
+  }
+
+  .box-input {
+    &.input-full {
+      cursor: no-drop;
+    }
+  }
+}
+
+.dropper {
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-bottom: .5rem;
+  padding-top: .5rem;
+  border-top: 1px solid $color-action;
+
+  .droper-label {
+    width: 100%;
+    font-size: .6rem;
+    font-weight: 400;
+    text-align: center;
+    margin-bottom: 0px;
+  }
+}
+
 .box-input {
   display: flex;
   flex-wrap: wrap;
   background-color: $color-white;
-  // outline: 1px dashed $color-secondary;
   outline-offset: -10px;
   padding: 1rem;
+  padding-bottom: 0px;
 
   .input-placeholder {
     .placeholder {
@@ -230,17 +342,114 @@ export default {
     }
   }
 
-    .preview-wrapper {
-      width: 100px;
-      height: 100px;
-      border-radius: $borderRadiusMedium;
-      border: 1px solid $color-clickable;
+  .preview-wrapper {
+    width: 100px;
+    height: 100px;
+    border-radius: $borderRadiusMedium;
+    border: 1px solid $color-clickable;
+    display: grid;
 
-      img {
-        border-radius: $borderRadiusMedium;
-        height: 100%;
-        width: 100%;
+    &.queueing {
+      opacity: .50;
+    }
+
+    &.uploading {
+      opacity: .80;
+    }
+
+    &.uploaded {
+      cursor: pointer;
+    }
+
+    .top-info {
+      padding: 3px;
+      margin-top: -98px;
+      height: 20px;
+      display: flex;
+      justify-content: flex-end;
+
+      .close-logo {
+        background: white;
+        border-radius: 5px;
+        width: 15px;
+        height: 15px;
+        opacity: .6;
+        padding: 3px;
+
+        &:hover {
+          opacity: 1;
+        }
       }
+    }
+
+    .center-info {
+      display: flex;
+      justify-content: center;
+      height: 60px;
+      margin-top: -65px;
+      display: flex;
+      align-content: center;
+
+      .retry-logo {
+        background: white;
+        border-radius: 5px;
+        height: 30px;
+        width: 30px;
+        padding: 6px;
+        cursor: pointer;
+        opacity: .6;
+
+        &:hover {
+          opacity: 1;
+        }
+      }
+    }
+
+    .bottom-info {
+      padding: 3px;
+      margin-top: -19px;
+      height: 20px;
+      // border-bottom-left-radius: $borderRadiusMedium;
+      // border-bottom-right-radius: $borderRadiusMedium;
+
+      .content {
+        margin-bottom: 0px;
+        background-color: $color-secondary;
+        border-radius: 5px;
+        padding: 1px;
+
+        p {
+          font-size: 9px;
+          line-height:6px;
+          margin-bottom: 0px
+        }
+
+        &.loading {
+          .progress {
+            height: 9px;
+            background-color: white;
+          }
+        }
+
+        &.error {
+            height: 9px;
+            background-color: #ff4d4d;
+
+            p{
+              text-align: center;
+              color:white;
+            }
+        }
+      }
+    }
+
+    img {
+      border-radius: $borderRadiusMedium;
+      height: 98px;
+      width: 98px;
+      background-color: $color-action;
+    }
   }
 }
+
 </style>

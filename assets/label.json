@@ -1,6 +1,20 @@
 {
     "placeholder": {
-        "id": "Gambar",
-        "eng": "Image"
+        "id": "Tambahkan gambar disini",
+        "eng": "Add your image"
+    },
+    "errors": {
+        "general": {
+            "id": "Bermasalah",
+            "eng": "Error"
+        },
+        "invalid_file": {
+            "id": "Gambar yang dimaksudkan tidak memiliki ekstensi yang valid",
+            "eng": "Invlid image extension"
+        },
+        "max_file": {
+            "id": "Anda telah melampaui batas gambar yang ditambahkan (#n)",
+            "eng": "You have exceeded the limit of the added image (#n#)"
+        }
     }
 }

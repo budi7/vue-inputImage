@@ -8,7 +8,11 @@ export default {
     }
   },
   methods: {
-    s3Upload (s3FileObject, filename) {
+    uploaderUpload (s3FileObject, filename) {
+      if (s3FileObject && s3FileObject.is_uploading) {
+        return
+      }
+
       const vm = this
 
       // init object state
@@ -22,7 +26,7 @@ export default {
         s3FileObject.uploaded_url = url
         s3FileObject.is_error = false
         s3FileObject.is_uploading = false
-        vm.$emit('s3Uploaded', s3FileObject)
+        vm.$emit('uploaderUploaded', s3FileObject)
       }
 
       function handleError (error) {
@@ -30,7 +34,7 @@ export default {
         s3FileObject.is_error = true
         s3FileObject.progress = 0
         s3FileObject.is_uploading = false
-        vm.$emit('s3UploadError', s3FileObject)
+        vm.$emit('uploaderUploadError', s3FileObject)
       }
 
       // upload s3
@@ -59,7 +63,7 @@ export default {
         handleError(err)
       }
     },
-    s3Delete (urls) {
+    uploaderDelete (urls) {
       const params = {
         Bucket: this.s3Params.Bucket,
         // Key: 'basil/' + tmp[tmp.length - 1]
@@ -80,7 +84,7 @@ export default {
         }
       })
     },
-    s3MakeFileObject (data, ext, isBase64) {
+    uploaderMakeFileObject (data, ext, isBase64) {
       if (!ext || !data) {
         console.error('no data or file extension on s3MakeFileObject')
         return
@@ -100,7 +104,7 @@ export default {
         ext
       }
     },
-    s3FromBase64 (b64) {
+    uploaderFromBase64 (b64) {
       return Buffer.from(b64.replace(/^data:image\/\w+;base64,/, ''), 'base64')
     }
   }
