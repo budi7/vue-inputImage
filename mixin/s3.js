@@ -3,8 +3,8 @@ import AWS from 'aws-sdk'
 export default {
   data () {
     return {
-      s3: new AWS.S3(require('~/json/dospace').s3Object),
-      s3Params: require('~/json/dospace').params
+      s3: new AWS.S3(require('~/json/dospace.json').s3Object),
+      s3Params: require('~/json/dospace.json').s3Params
     }
   },
   methods: {
@@ -34,7 +34,7 @@ export default {
         s3FileObject.is_error = true
         s3FileObject.progress = 0
         s3FileObject.is_uploading = false
-        vm.$emit('uploaderUploadError', s3FileObject)
+        vm.$emit('uploaderError', s3FileObject)
       }
 
       // upload s3
@@ -45,8 +45,8 @@ export default {
             ? (this.s3Params.Key + filename + '.' + s3FileObject.ext)
             : (this.s3Params.Key + s3FileObject.id + '.' + s3FileObject.ext),
           Body: s3FileObject.data,
-          ACL: 'public-read',
-          ContentType: 'image/jpeg'
+          ACL: this.s3Params.ACL,
+          ContentType: this.s3Params.ContentType
         }
         // console.log('chekc param', params)
         this.s3.upload(params, function (err, res) {
@@ -90,8 +90,11 @@ export default {
         return
       }
 
+      const dt = new Date()
+      const randomizer = (Math.floor(Math.random() * 10000) + 10000).toString().substring(1)
+
       return {
-        id: new Date().getTime(),
+        id: dt.getTime() + dt.getMilliseconds() + randomizer,
         preview: isBase64 ? data : URL.createObjectURL(data),
         data,
         filename: '',

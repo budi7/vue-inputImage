@@ -31,8 +31,15 @@
       </div>
       <div v-for="(dt,i ) in queuedFiles" :key="`queued-${i}`" :class="`preview-wrapper ${contentClass} ` + (!dt.is_uploading && !dt.is_error ? 'queueing' : 'uploading' )">
         <img :src="dt.preview" class="img">
+        <!-- queueing  -->
+        <div v-if="!(dt.is_uploading || dt.is_error)" class="bottom-info">
+          <div class="content loading">
+            <div class="progress" style="width: 0px;" />
+          </div>
+        </div>
+
+        <!-- loading  -->
         <div v-if="dt.is_uploading" class="bottom-info">
-          <!-- loading  -->
           <div class="content loading">
             <div class="progress" :style="`width: ${dt.progress}%;`" />
           </div>
@@ -42,7 +49,7 @@
         <div v-if="dt.is_error" class="top-info" @click="removeFromQueue(i)">
           <img class="close-logo" :src="closeLogo">
         </div>
-        <div v-if="dt.is_error" class="center-info">
+        <div v-if="dt.is_error" class="center-info" @click="handleInputRetry(i)">
           <img class="retry-logo" :src="retryLogo">
         </div>
         <div v-if="dt.is_error" class="bottom-info">
@@ -74,12 +81,12 @@ export default {
   props: {
     value: {
       default: () => { return [] },
-      type: Array
+      type: [Array, String]
     },
-    // multiUploadProcessor: {
-    //   default: 2,
-    //   type: Number
-    // },
+    multiUploadProcessor: {
+      default: 1,
+      type: Number
+    },
     maxFile: {
       default: null,
       type: Number
@@ -119,7 +126,9 @@ export default {
       trash: [],
       is_full: false,
       is_processing: false,
-      multiUploadProcessor: 1,
+      // multiUploadProcessor: 2,
+      procPointer: 0,
+      usedProcessor: 0,
 
       label: require('./assets/label.json'),
       placeholderLogo: require('./assets/placeholder.svg'),
@@ -129,7 +138,11 @@ export default {
   },
   watch: {
     value (val) {
-      this.input = val
+      if (!val) {
+        this.input = []
+      } else {
+        this.input = typeof val === 'string' ? [val] : val
+      }
       this.checkIsFull()
     }
   },
@@ -141,20 +154,34 @@ export default {
       })
       this.input.push(res.uploaded_url)
       this.queuedFiles.splice(finishedProcessIdx, 1)
+      this.usedProcessor -= parseInt(1)
+      this.procPointer -= parseInt(1)
       this.$emit('input', this.input)
 
       // on s3 upload done, run next queue
-      setTimeout(() => {
-        this.processQueue()
-      }, 1100) // get auto name per seconnd (consider autonaming use milisecond to remove this temiout block)
+      this.processQueue()
+      // setTimeout(() => {
+      //   this.processQueue()
+      // }, 1100) // get auto name per seconnd (consider autonaming use milisecond to remove this temiout block)
     })
     this.$on('uploaderError', (error) => {
       // on s3 upload error, run next queue
       console.log('error', error)
+      console.log('proc', this.procPointer)
+      this.usedProcessor -= parseInt(1)
+      if (this.is_processing) {
+        this.processQueue()
+      }
     })
   },
   mounted () {
-    this.input = this.value
+    this.input = !this.value
+      ? []
+      : (
+          typeof this.value === 'string'
+            ? [this.value]
+            : this.value
+        )
     this.checkIsFull()
   },
   destroyed () {
@@ -165,7 +192,7 @@ export default {
     handleDroppedFile (evt) {
       evt.currentTarget.classList.remove('hovered')
 
-      if (evt.dataTransfer.files.length > this.maxFile) {
+      if (evt.dataTransfer.files.length > (this.maxFile - this.input.length)) {
         this.$emit('error', this.label.errors.max_file[this.lang])
         return
       }
@@ -204,8 +231,37 @@ export default {
       this.checkIsFull()
       this.processQueue()
     },
+    handleInputRetry (idx) {
+      this.procPointer = idx
+
+      for (let idx = 0; idx < this.queuedFiles.length; idx++) {
+        const tmp = JSON.parse(JSON.stringify(this.queuedFiles[idx]))
+        tmp.is_error = false
+        tmp.is_uploading = false
+        this.queuedFiles[idx] = tmp
+      }
+
+      this.processQueue()
+    },
     processQueue () {
       if (this.queuedFiles.length === 0) {
+        this.$emit('done', this.queuedFiles)
+        return
+      }
+
+      // count processed data
+      console.log('tes', this.procPointer, this.queuedFiles.length)
+      // const nProc = this.queuedFiles.reduce(function (accum, val) {
+      //   if (val.is_uploaded || val.is_error) {
+      //     return accum + parseInt(1)
+      //   } else {
+      //     return accum
+      //   }
+      // }, 0)
+
+      if (this.procPointer >= this.queuedFiles.length) {
+        console.log('slesai')
+        this.is_processing = false
         this.$emit('done', this.queuedFiles)
         return
       }
@@ -215,12 +271,41 @@ export default {
 
       this.is_processing = true
 
-      for (let idx = 0; idx < this.multiUploadProcessor; idx++) {
+      console.log('processor', this.multiUploadProcessor, this.usedProcessor)
+      let lastTaskId = -1
+      for (let idx = 0; idx < (this.multiUploadProcessor - this.usedProcessor); idx++) {
         // upload to s3
-        console.log('processing', idx, this.queuedFiles[idx])
-        if (this.queuedFiles[idx]) {
-          this.uploaderUpload(this.queuedFiles[idx])
+        function findTask (dt) {
+          // console.log('check dt', dt, lastTaskId)
+          if (dt[lastTaskId].is_uploading || dt[lastTaskId].is_error) {
+            lastTaskId += parseInt(1)
+            return findTask(dt)
+          } else {
+            return lastTaskId
+          }
         }
+
+        lastTaskId += parseInt(1)
+        if (this.queuedFiles[lastTaskId]) {
+          this.usedProcessor += parseInt(1)
+          console.log('input', JSON.parse(JSON.stringify(this.queuedFiles)))
+          const procId = findTask(JSON.parse(JSON.stringify(this.queuedFiles)))
+          this.procPointer += parseInt(1)
+          console.log('uploading', this.queuedFiles[procId])
+          this.uploaderUpload(this.queuedFiles[procId])
+        } else {
+          console.error('task not found')
+        }
+
+        console.log('task id', lastTaskId)
+
+        // console.log('processing', this.procPointer, this.queuedFiles[this.procPointer])
+        // if (this.queuedFiles[this.procPointer]) {
+        //   const ptr = this.procPointer
+        //   this.usedProcessor += parseInt(1)
+        //   this.procPointer += parseInt(1)
+        //   this.uploaderUpload(this.queuedFiles[ptr])
+        // }
       }
     },
     processRemove (dt) {
@@ -234,6 +319,7 @@ export default {
       this.uploaderDelete(this.trash)
     },
     checkIsFull () {
+      console.log(this.maxFile, (this.input.length + this.queuedFiles.length))
       this.is_full = (this.maxFile && (this.input.length + this.queuedFiles.length >= this.maxFile))
     },
 
@@ -248,6 +334,8 @@ export default {
     },
     removeFromQueue (i) {
       this.queuedFiles.splice(i, 1)
+      this.procPointer -= parseInt(1)
+      // this.processQueue()
     }
   }
 }
@@ -265,6 +353,7 @@ export default {
             user-select: none; /* Non-prefixed version, currently
                                   supported by Chrome, Edge, Opera and Firefox */
   border: 2px dashed $color-white;
+  border-radius: $borderRadiusMedium;
 }
 
 .hovered {
@@ -295,10 +384,13 @@ export default {
   padding-bottom: .5rem;
   padding-top: .5rem;
   border-top: 1px solid $color-action;
+  border-bottom-left-radius: $borderRadiusMedium;
+  border-bottom-right-radius: $borderRadiusMedium;
+  background-color: $color-white;
 
   .droper-label {
     width: 100%;
-    font-size: .6rem;
+    font-size: .75rem;
     font-weight: 400;
     text-align: center;
     margin-bottom: 0px;
@@ -310,6 +402,7 @@ export default {
   flex-wrap: wrap;
   background-color: $color-white;
   outline-offset: -10px;
+  // padding: 1rem;
   padding: 1rem;
   padding-bottom: 0px;
 
