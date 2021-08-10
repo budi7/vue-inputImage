@@ -1,0 +1,13 @@
+{
+    "s3Object": {
+        "endpoint": "",
+        "accessKeyId": "",
+        "secretAccessKey": ""
+    },
+    "s3Params": {
+        "Bucket": "",
+        "Key": "",
+        "ACL": "public-read",
+        "ContentType": "image/jpeg"
+    }
+}

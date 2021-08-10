@@ -25,7 +25,7 @@
       </div>
       <div v-for="(dt,i ) in input" :key="`uploaded-${i}`" :class="`preview-wrapper uploaded ${contentClass}`" @click="$emit('click', dt)">
         <img :src="dt" class="img">
-        <div class="top-info" @click="removeFromInput(i)">
+        <div class="top-info" @click="removeFromInput(dt, i)">
           <img class="close-logo" :src="closeLogo">
         </div>
       </div>
@@ -315,6 +315,7 @@ export default {
       this.checkIsFull()
     },
     commitImageRemoval () {
+      console.log('removing')
       if (this.trash.length === 0) { return }
       this.uploaderDelete(this.trash)
     },
@@ -329,8 +330,10 @@ export default {
     handleOnLeave (evt) {
       evt.currentTarget.classList.remove('hovered')
     },
-    removeFromInput (i) {
+    removeFromInput (dt, i) {
+      this.trash.push(dt)
       this.input.splice(i, 1)
+      this.$emit('remove', this.input[i])
     },
     removeFromQueue (i) {
       this.queuedFiles.splice(i, 1)
